@@ -7,6 +7,10 @@
         "daemonize.h": "c",
         "errno.h": "c",
         "reportman_types.h": "c",
-        "socket.h": "c"
+        "socket.h": "c",
+        "stdio.h": "c",
+        "poll.h": "c",
+        "signal.h": "c",
+        "string.h": "c"
     }
 }

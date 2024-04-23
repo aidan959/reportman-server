@@ -6,6 +6,9 @@
 #include <errno.h>
 #include <signal.h>
 #include <string.h>
+#include <sys/signalfd.h>
+
+
 #include <signal.h>
 
 #include <unistd.h>
@@ -228,4 +231,35 @@ void __free_running_pids(running_pid_t *pid, unsigned long num_pids)
         free(pid[i].command);
     }
     free(pid);
+}
+
+
+int r_initialize_signals(void)
+{
+    int signal_fd;
+    sigset_t sigmask;
+
+    sigemptyset(&sigmask);
+    sigaddset(&sigmask, SIGINT);
+    sigaddset(&sigmask, SIGTERM);
+
+    if (sigprocmask(SIG_BLOCK, &sigmask, NULL) < 0)
+    {
+        syslog(LOG_ERR,
+               "Couldn't block signals: '%s'\n",
+               strerror(errno));
+        return -1;
+    }
+
+    // get new file descriptor for signals
+    if ((signal_fd = signalfd(-1, &sigmask, 0)) < 0)
+    {
+        syslog(LOG_ERR,
+               "Couldn't setup signal FD: '%s'\n",
+               strerror(errno));
+        return -1;
+    }
+    // signal(SIGINT, __clean_close);
+    // signal(SIGTERM, __clean_close);
+    return signal_fd;
 }
