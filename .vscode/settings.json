@@ -5,6 +5,8 @@
         "reportman.h": "c",
         "reportman_server.h": "c",
         "daemonize.h": "c",
-        "errno.h": "c"
+        "errno.h": "c",
+        "reportman_types.h": "c",
+        "socket.h": "c"
     }
 }
