@@ -15,3 +15,9 @@ typedef struct
     const char* transfer_time_str;
 
 } daemon_arguments_t;
+
+typedef struct
+{
+    int pid;
+    char * command;
+} running_pid_t;
