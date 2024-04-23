@@ -12,14 +12,14 @@ OBJ_LIBS=$(OBJ)/libs
 
 NAME=reportman
 
-DAEMON=$(NAME)d
-CLIENT=$(NAME)c
-MONITOR=$(NAME)_mon
-FM=$(NAME)_fm
+DAEMON=$(NAME)_serverd
+CLIENT=$(NAME)_client
+# MONITOR=$(NAME)_mon
+# FM=$(NAME)_fm
 
 LOG_DIR=/var/log/$(NAME)
 
-EXECUTABLES = $(DAEMON) $(CLIENT) $(MONITOR) $(FM)
+EXECUTABLES = $(DAEMON) $(CLIENT) # $(MONITOR) $(FM)
 EXECUTABLES_SRC = $(addprefix $(SRC)/,$(addsuffix .c, $(EXECUTABLES)))
 EXECUTABLES_OBJ = $(addprefix $(OBJ)/,$(addsuffix .o, $(EXECUTABLES)))
 
@@ -28,20 +28,20 @@ USRBIN = /usr/bin
 
 SOURCES_C:=$(filter-out $(EXECUTABLES_SRC), $(wildcard $(SRC)/*.c) $(wildcard $(SRC)/**/*.c)) $(SRC)/$(CLIENT).c
 SOURCES_D:=$(filter-out $(EXECUTABLES_SRC), $(wildcard $(SRC)/*.c) $(wildcard $(SRC)/**/*.c)) $(SRC)/$(DAEMON).c
-SOURCES_MON:=$(filter-out $(EXECUTABLES_SRC), $(wildcard $(SRC)/*.c) $(wildcard $(SRC)/**/*.c)) $(SRC)/$(MONITOR).c
-SOURCES_FM:=$(filter-out $(EXECUTABLES_SRC), $(wildcard $(SRC)/*.c) $(wildcard $(SRC)/**/*.c)) $(SRC)/$(FM).c
+# SOURCES_MON:=$(filter-out $(EXECUTABLES_SRC), $(wildcard $(SRC)/*.c) $(wildcard $(SRC)/**/*.c)) $(SRC)/$(MONITOR).c
+# SOURCES_FM:=$(filter-out $(EXECUTABLES_SRC), $(wildcard $(SRC)/*.c) $(wildcard $(SRC)/**/*.c)) $(SRC)/$(FM).c
 
 DAEMON_BIN=$(BIN)/$(DAEMON)
 CLIENT_BIN=$(BIN)/$(CLIENT)
-MONITOR_BIN=$(BIN)/$(MONITOR)
-FM_BIN=$(BIN)/$(FM)
+# MONITOR_BIN=$(BIN)/$(MONITOR)
+# FM_BIN=$(BIN)/$(FM)
 
-EXECUTABLES_BIN = $(DAEMON_BIN) $(CLIENT_BIN) $(MONITOR_BIN) $(FM_BIN)
+EXECUTABLES_BIN = $(DAEMON_BIN) $(CLIENT_BIN) # $(MONITOR_BIN) $(FM_BIN)
 
 OBJECTS_C := $(filter-out $(EXECUTABLES_OBJ),$(patsubst $(SRC)/%.c, $(OBJ)/%.o, $(SOURCES_C))) $(OBJ)/$(CLIENT).o
 OBJECTS_D := $(filter-out $(EXECUTABLES_OBJ),$(patsubst $(SRC)/%.c, $(OBJ)/%.o, $(SOURCES_D))) $(OBJ)/$(DAEMON).o
-OBJECTS_MON := $(filter-out $(EXECUTABLES_OBJ),$(patsubst $(SRC)/%.c, $(OBJ)/%.o, $(SOURCES_MON))) $(OBJ)/$(MONITOR).o
-OBJECTS_FM := $(filter-out $(EXECUTABLES_OBJ),$(patsubst $(SRC)/%.c, $(OBJ)/%.o, $(SOURCES_FM))) $(OBJ)/$(FM).o
+# OBJECTS_MON := $(filter-out $(EXECUTABLES_OBJ),$(patsubst $(SRC)/%.c, $(OBJ)/%.o, $(SOURCES_MON))) $(OBJ)/$(MONITOR).o
+# OBJECTS_FM := $(filter-out $(EXECUTABLES_OBJ),$(patsubst $(SRC)/%.c, $(OBJ)/%.o, $(SOURCES_FM))) $(OBJ)/$(FM).o
 
 all: $(EXECUTABLES_BIN)
 
@@ -67,23 +67,23 @@ $(OBJ)/$(CLIENT).o: $(SRC)/$(CLIENT).c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) $< -o $@
 
-# MONITOR MAKE TARGETS
-$(MONITOR_BIN) : $(OBJECTS_MON)
-	@mkdir -p $(@D)
-	$(CC) $^ -o $@ $(LIBS)
+## MONITOR MAKE TARGETS
+#$(MONITOR_BIN) : $(OBJECTS_MON)
+#	@mkdir -p $(@D)
+#	$(CC) $^ -o $@ $(LIBS)
+#
+#$(OBJ)/$(MONITOR).o: $(SRC)/$(MONITOR).c
+#	@mkdir -p $(@D)
+#	$(CC) $(CFLAGS) $< -o $@
 
-$(OBJ)/$(MONITOR).o: $(SRC)/$(MONITOR).c
-	@mkdir -p $(@D)
-	$(CC) $(CFLAGS) $< -o $@
-
-# FM MAKE TARGETS
-$(FM_BIN) : $(OBJECTS_FM)
-	@mkdir -p $(@D)
-	$(CC) $^ -o $@ $(LIBS)
-
-$(OBJ)/$(FM).o: $(SRC)/$(FM).c
-	@mkdir -p $(@D)
-	$(CC) $(CFLAGS) $< -o $@
+# # FM MAKE TARGETS
+# $(FM_BIN) : $(OBJECTS_FM)
+# 	@mkdir -p $(@D)
+# 	$(CC) $^ -o $@ $(LIBS)
+# 
+# $(OBJ)/$(FM).o: $(SRC)/$(FM).c
+# 	@mkdir -p $(@D)
+# 	$(CC) $(CFLAGS) $< -o $@
 
 # LIBRARY MAKE TARGETS
 $(OBJ_LIBS)/%.o: $(SRC_LIBS)/%.c $(SRC_LIBS)/$(INC)/%.h
@@ -101,10 +101,10 @@ install: $(DAEMON_BIN) | $(CLIENT_BIN)
 	@sudo mkdir -p /srv/$(NAME)
 
 	
-	@sudo groupadd afnbadmin || true
+	@sudo groupadd repartman-serv || true
 	@sudo useradd $(NAME) -s /sbin/nologin -r -M -d / || true
-	@sudo chown -R $(NAME):afnbadmin $(LOG_DIR)
-	@sudo chown -R $(NAME):afnbadmin /srv/$(NAME)
+	@sudo chown -R $(NAME):repartman-serv $(LOG_DIR)
+	@sudo chown -R $(NAME):repartman-serv /srv/$(NAME)
 	
 	sudo setcap cap_setuid+ep $(DAEMON_BIN)
 
@@ -113,8 +113,6 @@ install: $(DAEMON_BIN) | $(CLIENT_BIN)
 
 	install -o $(NAME) -m 554 $(DAEMON_BIN) $(USRBIN)
 	install -o $(NAME) -m 555 $(CLIENT_BIN) $(USRBIN)
-	install -o $(NAME) -m 555 $(MONITOR_BIN) $(USRBIN)
-	install -o $(NAME) -m 555 $(FM_BIN) $(USRBIN)
 	cp $(NAME).service /etc/systemd/system/
 
 	@sudo systemctl daemon-reload
