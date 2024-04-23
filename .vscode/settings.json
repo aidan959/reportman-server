@@ -1,0 +1,10 @@
+{
+    "files.associations": {
+        "*.pro": "prolog",
+        "stdbool.h": "c",
+        "reportman.h": "c",
+        "reportman_server.h": "c",
+        "daemonize.h": "c",
+        "errno.h": "c"
+    }
+}

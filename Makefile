@@ -12,7 +12,7 @@ OBJ_LIBS=$(OBJ)/libs
 
 NAME=reportman
 
-DAEMON=$(NAME)_serverd
+DAEMON=$(NAME)_server
 CLIENT=$(NAME)_client
 # MONITOR=$(NAME)_mon
 # FM=$(NAME)_fm

@@ -3,22 +3,45 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <bool.h>
+#include <stdbool.h>
+#include <syslog.h>
+#include <errno.h>
+
+
+#include "include/reportman_server.h"
 #include "libs/include/reportman.h"
+#include "libs/include/reportman_types.h"
 
 static daemon_arguments_t __exec_args = {
     .make_daemon = true,
     .daemon_port = REPORTMAND_BIND_PORT,
     .force = false,
     .close = false,
-    .transfer_time_str = "23:30",
-    .backup_time_str = "01:00",
     .log_to_sys = false,
-    .log_to_file = true,
-    .monitor_log_file_path = M_LOG_PATH,
-    .monitor_log_sys_name = "reportman_mon"
-    };
+    .log_to_file = true
+};
 int d_socket;
+static void __acquire_singleton(void);
+static int __force_singleton(int singleton_result, unsigned short port);
+static void __kill_pid(int pid); // TODO maybe move some process managing tool?
+
+int __force_singleton(int singleton_result, unsigned short port)
+{
+    syslog(LOG_WARNING, "Forcing reportman_server to start on port %d", port);
+    printf("Forcing reportman_server to start on port %d\n", port);
+
+    __kill_pid(singleton_result);
+    sleep(1);
+    singleton_result = d_acquire_singleton(&d_socket, port);
+    if (singleton_result != IS_SINGLETON)
+    {
+        fprintf(stderr, "Could not acquire singleton after force.");
+
+        exit(EXIT_FAILURE);
+    }
+    return singleton_result;
+}
+
 
 static void __acquire_singleton(void)
 {
@@ -54,8 +77,17 @@ static void __acquire_singleton(void)
         singleton_result = __force_singleton(singleton_result, __exec_args.daemon_port);
     }
 }
-
-int main () {
+static void __kill_pid(int singleton_result)
+{
+    if (kill(singleton_result, SIGTERM) < 0)
+    {
+        perror("Error killing other process, use systemctl instead.");
+        exit(errno);
+    }
+}
+int main (void) {
+    // ! TODO: Populate arguments
+    
     __acquire_singleton();
 
 }
