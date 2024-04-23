@@ -1,0 +1,7 @@
+#ifndef REPORTMAND_BIND_PORT
+#define REPORTMAND_BIND_PORT 7770
+
+#define IS_SINGLETON 0
+#define BIND_FAILED -1
+
+#endif
