@@ -12,7 +12,7 @@
 #include <string.h>
 #include <poll.h>
 #include <sys/signalfd.h>
-
+#include <sys/socket.h>
 #include "include/reportman_server.h"
 #include "libs/include/reportman.h"
 #include "libs/include/daemonize.h"
@@ -189,12 +189,51 @@ static int __kill_children(void)
 }
 
 
+void *handle_client(void *arg) {
+    int client_socket = *((int *)arg);
+    char buffer[COMMUNICATION_BUFFER_SIZE];
+    FILE *file;
+    ssize_t bytes_received;
+
+    // Receive file name
+    bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0);
+    if (bytes_received < 0) {
+        perror("Error receiving file name");
+        close(client_socket);
+        pthread_exit(NULL);
+    }
+    buffer[bytes_received] = '\0';
+
+    // Open file for writing
+    file = fopen(buffer, "wb");
+    if (file == NULL) {
+        perror("Error opening file");
+        close(client_socket);
+        pthread_exit(NULL);
+    }
+
+    // Receive and write file content
+    while ((bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0)) > 0) {
+        fwrite(buffer, 1, bytes_received, file);
+    }
+
+    if (bytes_received < 0) {
+        perror("Error receiving file content");
+    }
+
+    fclose(file);
+    close(client_socket);
+    pthread_exit(NULL);
+}
+
 static void __handle_client(void)
 {
     static unsigned long long client_id = 0;
     char buffer[COMMUNICATION_BUFFER_SIZE];
 
     struct sockaddr_in client_addr;
+    pthread_t thread_id;
+
     socklen_t client_addr_len = sizeof(client_addr);
 
     int client_fd = accept(d_socket, (struct sockaddr *)&client_addr, &client_addr_len);
@@ -227,8 +266,8 @@ static void __handle_client(void)
             // FD_ISSET(0, &readfds) will be true.
             buffer[len] = '\0';
             syslog(LOG_NOTICE, "Received command %s from client %llu\n", buffer, client_id);
-            
-            write(client_fd, response.response, strlen(response.response));
+            pthread_create(&thread_id, NULL, handle_client, (void *)&client_fd);
+            write(client_fd, "", 0);
         }
         else if (len == 0)
         {
