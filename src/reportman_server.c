@@ -7,17 +7,15 @@
 #include <syslog.h>
 #include <errno.h>
 #include <signal.h>
+#include <pthread.h>
 #include <unistd.h>
 #include <string.h>
 #include <poll.h>
 #include <sys/signalfd.h>
 
-
-
 #include "include/reportman_server.h"
 #include "libs/include/reportman.h"
 #include "libs/include/daemonize.h"
-
 #include "libs/include/reportman_types.h"
 
 static daemon_arguments_t __exec_args = {
@@ -154,34 +152,7 @@ static int __handle_clients(void)
             __kill_children();
             exit(EXIT_FAILURE);
         }
-        if (fds[RMD_FD_POLL_SIGNAL].revents & POLLIN)
-        {
-            struct signalfd_siginfo fdsi;
-
-            // signal size received from read was incorrect
-            ssize_t read_size;
-            if ((read_size = read(fds[RMD_FD_POLL_SIGNAL].fd, &fdsi, sizeof(fdsi))) != sizeof(fdsi))
-            {
-                syslog(LOG_CRIT,
-                       "Couldn't read signal, wrong size read(fsdi '%ld' != read() '%ld')",
-                       sizeof(fdsi),
-                       read_size);
-                __kill_children();
-                exit(EXIT_FAILURE);
-            }
-
-            if (fdsi.ssi_signo == SIGINT ||
-                fdsi.ssi_signo == SIGTERM)
-            {
-                // TODO TELL CHILDREN TO DIE
-                __kill_children();
-                __client_request_close = true;
-                break;
-            }
-
-            syslog(LOG_CRIT,
-                   "Received unexpected signal ? ");
-        }
+        
         if (fds[RMD_FD_POLL_CLIENT].revents & POLLIN)
         {
             __handle_client();
@@ -227,6 +198,7 @@ static void __handle_client(void)
     socklen_t client_addr_len = sizeof(client_addr);
 
     int client_fd = accept(d_socket, (struct sockaddr *)&client_addr, &client_addr_len);
+
     if (client_fd < 0)
     {
         if (errno == EINTR)
@@ -240,6 +212,7 @@ static void __handle_client(void)
 
     tv.tv_sec = 10;
     tv.tv_usec = 0;
+
     FD_ZERO(&readfds);
     FD_SET(client_fd, &readfds);
 
@@ -254,8 +227,7 @@ static void __handle_client(void)
             // FD_ISSET(0, &readfds) will be true.
             buffer[len] = '\0';
             syslog(LOG_NOTICE, "Received command %s from client %llu\n", buffer, client_id);
-            command_response_t response;
-            __handle_command(buffer, client_id, &response);
+            
             write(client_fd, response.response, strlen(response.response));
         }
         else if (len == 0)

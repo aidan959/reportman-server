@@ -11,6 +11,7 @@
         "stdio.h": "c",
         "poll.h": "c",
         "signal.h": "c",
-        "string.h": "c"
+        "string.h": "c",
+        "syslog.h": "c"
     }
 }
