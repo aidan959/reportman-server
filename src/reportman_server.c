@@ -12,7 +12,10 @@
 #include <string.h>
 #include <poll.h>
 #include <sys/signalfd.h>
+#include <sys/time.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
+#include <sys/wait.h>
 #include "include/reportman_server.h"
 #include "libs/include/reportman.h"
 #include "libs/include/daemonize.h"
@@ -24,8 +27,7 @@ static daemon_arguments_t __exec_args = {
     .force = false,
     .close = false,
     .log_to_sys = false,
-    .log_to_file = true
-};
+    .log_to_file = true};
 int d_socket;
 // --- MAYBE MOVE
 static void __acquire_singleton(void);
@@ -36,7 +38,6 @@ static bool __client_request_close = false;
 static void __handle_sigpipe(int sig);
 static int __handle_clients(void);
 static void __handle_client(void);
-
 
 static void __clean_close(int signal_fd, int exit_code);
 static int __kill_children(void);
@@ -57,7 +58,6 @@ int __force_singleton(int singleton_result, unsigned short port)
     }
     return singleton_result;
 }
-
 
 static void __acquire_singleton(void)
 {
@@ -94,15 +94,14 @@ static void __acquire_singleton(void)
     }
 }
 
-int main (void) {
+int main(void)
+{
     // ! TODO: Populate arguments
     __acquire_singleton();
 
     printf("Server got singleton on port: %u", __exec_args.daemon_port);
     return __handle_clients();
 }
-
-
 
 // ! REALLY REALLY IMPORTANT THAT EXECUTION HERE IS FULLY CONTROLLED
 // TODO ABSTRACT THE METHODS HERE
@@ -126,7 +125,7 @@ static int __handle_clients(void)
     struct pollfd fds[RMD_FD_POLL_MAX];
     int signal_fd;
 
-    if ((signal_fd = r_cinitialize_signals()) < 0)
+    if ((signal_fd = r_initialize_signals()) < 0)
     {
         syslog(LOG_ERR, "Could not initialize signals");
         exit(EXIT_FAILURE);
@@ -152,7 +151,7 @@ static int __handle_clients(void)
             __kill_children();
             exit(EXIT_FAILURE);
         }
-        
+
         if (fds[RMD_FD_POLL_CLIENT].revents & POLLIN)
         {
             __handle_client();
@@ -161,7 +160,6 @@ static int __handle_clients(void)
     __clean_close(signal_fd, EXIT_SUCCESS);
     return D_SUCCESS;
 }
-
 
 static void __clean_close(int signal_fd, int exit_code)
 {
@@ -188,8 +186,8 @@ static int __kill_children(void)
     return status;
 }
 
-
-void *handle_client(void *arg) {
+void *handle_client(void *arg)
+{
     int client_socket = *((int *)arg);
     char buffer[COMMUNICATION_BUFFER_SIZE];
     FILE *file;
@@ -197,7 +195,8 @@ void *handle_client(void *arg) {
 
     // Receive file name
     bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0);
-    if (bytes_received < 0) {
+    if (bytes_received < 0)
+    {
         perror("Error receiving file name");
         close(client_socket);
         pthread_exit(NULL);
@@ -205,19 +204,38 @@ void *handle_client(void *arg) {
     buffer[bytes_received] = '\0';
 
     // Open file for writing
-    file = fopen(buffer, "wb");
-    if (file == NULL) {
+    file = fopen(buffer, "wb+");
+    if (file == NULL)
+    {
         perror("Error opening file");
         close(client_socket);
         pthread_exit(NULL);
     }
 
     // Receive and write file content
-    while ((bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0)) > 0) {
-        fwrite(buffer, 1, bytes_received, file);
+    while ((bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0)) > 0)
+    {
+        fwrite(buffer, 1, (size_t)bytes_received, file);
     }
+    unsigned char *buf = 0;
+    size_t bufsize = 0;
+    do
+    {
+        bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0);
+        if (bytes_received <= 0)
+        {
+            perror("connection closed or error");
+            close(client_socket);
+        }
 
-    if (bytes_received < 0) {
+        buf = realloc(buf, bufsize + (size_t)bytes_received);
+        memcpy(buf + bufsize, buffer, (size_t)bytes_received);
+        bufsize += (size_t)bytes_received;
+
+    } while (bytes_received > 0);
+
+    if (bytes_received < 0)
+    {
         perror("Error receiving file content");
     }
 

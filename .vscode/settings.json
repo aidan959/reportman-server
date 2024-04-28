@@ -12,6 +12,8 @@
         "poll.h": "c",
         "signal.h": "c",
         "string.h": "c",
-        "syslog.h": "c"
+        "syslog.h": "c",
+        "signalfd.h": "c",
+        "in.h": "c"
     }
 }
