@@ -16,6 +16,9 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/wait.h>
+#include <pwd.h>
+#include <grp.h>
+#include <json-c/json.h>
 #include "include/reportman_server.h"
 #include "libs/include/reportman.h"
 #include "libs/include/daemonize.h"
@@ -33,6 +36,11 @@ int d_socket;
 static void __acquire_singleton(void);
 static int __force_singleton(int singleton_result, unsigned short port);
 // ---
+
+
+char *get_username(u_int64_t uid);
+char *get_groupname(u_int64_t gid);
+
 static bool __client_request_close = false;
 
 static void __handle_sigpipe(int sig);
@@ -99,7 +107,8 @@ int main(void)
     // ! TODO: Populate arguments
     __acquire_singleton();
 
-    printf("Server got singleton on port: %u", __exec_args.daemon_port);
+    printf("Server got singleton on port: %u\n", __exec_args.daemon_port);
+    fflush(stdout);
     return __handle_clients();
 }
 
@@ -194,60 +203,98 @@ void *handle_client(void *arg)
     int client_socket = *((int *)arg);
     char buffer[COMMUNICATION_BUFFER_SIZE];
     FILE *file;
-    ssize_t bytes_received;
 
-    // Receive file name
-    printf("Receiving file name\n");
-    bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0);
-    if (bytes_received < 0)
-    {
-        perror("Error receiving file name");
-        close(client_socket);
-        pthread_exit(NULL);
+    // Receive JSON data from client
+    ssize_t bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0);
+    if (bytes_received < 0) {
+        perror("Error receiving JSON data");
+        exit(EXIT_FAILURE);
     }
-    strcat(buffer, "_server");
+
+    // Null-terminate received data
     buffer[bytes_received] = '\0';
 
+    // Parse JSON data
+    json_object *jobj = json_tokener_parse(buffer);
+    if (jobj == NULL) {
+        perror("Error parsing JSON data");
+        exit(EXIT_FAILURE);
+    }
+
+    // Extract user ID and group ID from JSON object
+    json_object *uid_obj, *gid_obj, *file_size_obj, *file_path_obj;
+    if (!json_object_object_get_ex(jobj, "user_id", &uid_obj) ||
+        !json_object_object_get_ex(jobj, "group_id", &gid_obj) ||
+        !json_object_object_get_ex(jobj, "file_size", &file_size_obj) ||
+        !json_object_object_get_ex(jobj, "file_path", &file_path_obj)){
+        perror("Error extracting user_id or group_id from JSON object");
+        exit(EXIT_FAILURE);
+    }
+
+    u_int64_t uid = json_object_get_uint64(uid_obj);
+    u_int64_t gid = json_object_get_uint64(gid_obj);
+    u_int64_t file_size = json_object_get_uint64(file_size_obj);
+    const char *file_path = json_object_get_string(file_path_obj);
+
+    printf("Received user_id: %ld\n", uid);
+    printf("Received group_id: %ld\n", gid);
+    printf("Received file_size: %ld\n", file_size);
+    printf("Received file_path: %s\n", file_path);
+
+
+
+    // Get user and group names
+    char *username = get_username(uid);
+    char *groupname = get_groupname(gid);
+
+    if (username != NULL && groupname != NULL) {
+        printf("Received user_id: %ld (%s)\n", uid, username);
+        printf("Received group_id: %ld (%s)\n", gid, groupname);
+    } else {
+        printf("Error: Unable to retrieve user or group information.\n");
+    }
+    
+    long file_size_received = 0;
+    long total_bytes_received = 0;
+
+    char new_filename[COMMUNICATION_BUFFER_SIZE] = "./output/";
+    strcat(new_filename, file_path);
+
+
     // Open file for writing
-    printf("Opening file (%s) for writing.\n", buffer);
-    file = fopen(buffer, "wb+");
-    if (file == NULL)
-    {
+    printf("Opening file (%s) for writing.\n", new_filename);
+    file = fopen(new_filename, "wb");
+    if (file == NULL) {
         perror("Error opening file");
         close(client_socket);
         pthread_exit(NULL);
     }
 
-    // Receive and write file content
-    printf("Receiving file.\n");
-    while ((bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0)) > 0)
-    {
-        printf("Received bytes (%ld).\n", bytes_received);
-        fwrite(buffer, 1, (size_t)bytes_received, file);
-    }
-    unsigned char *buf = 0;
-    size_t bufsize = 0;
-    do
-    {
+    // Receive file content
+    printf("Receiving file content.\n");
+    while (total_bytes_received < file_size_received) {
         bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0);
-        if (bytes_received <= 0)
-        {
-            perror("connection closed or error");
-            close(client_socket);
+        if (bytes_received < 0) {
+            perror("Error receiving file content");
+            exit(EXIT_FAILURE);
+        } else if (bytes_received == 0) {
+            printf("Connection closed by client.\n");
+            break;
         }
-
-        buf = realloc(buf, bufsize + (size_t)bytes_received);
-        memcpy(buf + bufsize, buffer, (size_t)bytes_received);
-        bufsize += (size_t)bytes_received;
-
-    } while (bytes_received > 0);
-
-    if (bytes_received < 0)
-    {
+        total_bytes_received += bytes_received;
+        printf("Received bytes (%ld/%ld).\n", total_bytes_received, file_size_received);
+        size_t written = fwrite(buffer, 1, (size_t)bytes_received, file);
+        if (written < (size_t)bytes_received) {
+            perror("File write failed");
+            exit(EXIT_FAILURE);
+        }
+    }
+    printf("File received.\n");
+    if (bytes_received < 0) {
         perror("Error receiving file content");
     }
     // After successfully processing the file
-    send(client_socket, "ACK", 3, 0);
+    json_object_put(jobj);
     fclose(file);
     close(client_socket);
     pthread_exit(NULL);
@@ -272,7 +319,7 @@ static void __handle_client(void)
         syslog(LOG_ALERT, "accept() failed (unexpected): %s", strerror(errno));
         return;
     }
-
+    printf("Client connected\n");
     fd_set readfds;
     struct timeval tv;
 
@@ -285,11 +332,13 @@ static void __handle_client(void)
     int retval;
     while ((retval = select(client_fd + 1, &readfds, NULL, NULL, &tv)))
     {
+        handle_client((void *)&client_fd);
+        continue;
         ssize_t len = read(client_fd, buffer, COMMUNICATION_BUFFER_SIZE - 1);
         if (len > 0)
         {
             syslog(LOG_NOTICE, "Client %llu has connected to dameon.", client_id);
-
+            printf("Client %llu has connected to dameon.\n", client_id);
             // FD_ISSET(0, &readfds) will be true.
             buffer[len] = '\0';
             syslog(LOG_NOTICE, "Received command %s from client %llu\n", buffer, client_id);
@@ -320,4 +369,18 @@ static void __handle_client(void)
 
     close(client_fd); // Close the client socket
     client_id++;
+}
+
+
+
+
+
+char *get_username(u_int64_t uid) {
+    struct passwd *pw = getpwuid((uid_t)uid);
+    return (pw != NULL) ? pw->pw_name : NULL;
+}
+
+char *get_groupname(u_int64_t gid) {
+    struct group *gr = getgrgid((gid_t)gid);
+    return (gr != NULL) ? gr->gr_name : NULL;
 }

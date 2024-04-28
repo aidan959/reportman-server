@@ -1,6 +1,6 @@
 CC=/usr/sbin/gcc
 CFLAGS=-Wextra -Wall -Wfloat-equal -Wundef -Wshadow -Wpointer-arith -Wcast-align -Wstrict-prototypes -Wwrite-strings -Waggregate-return -Wcast-qual -Wswitch-default -Wswitch-enum -Wconversion -Wunreachable-code -c
-LIBS=-lcrypto
+LIBS=-lcrypto -ljson-c
 
 SRC=src
 INC=include
