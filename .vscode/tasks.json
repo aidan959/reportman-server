@@ -1,0 +1,24 @@
+{
+    "tasks": [
+        {
+            "label": "MakeAll",
+            "type": "shell",
+            "command": "make",
+            "args": [
+            ],
+            "options": {
+                
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "Runs make file.",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        }
+    ],
+    "version": "2.0.0"
+}
