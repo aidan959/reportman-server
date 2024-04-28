@@ -69,6 +69,12 @@ int main(int argc, char *argv[]) {
         perror("Error reading file");
         exit(EXIT_FAILURE);
     }
+    // Wait for acknowledgment from the server
+    bytes_read = recv(client_socket, buffer, BUFFER_SIZE, 0);
+    if (bytes_read < 0) {
+        perror("Error receiving acknowledgment");
+        exit(EXIT_FAILURE);
+    }
 
     fclose(file);
     close(client_socket);

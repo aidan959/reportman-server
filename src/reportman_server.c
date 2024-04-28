@@ -151,7 +151,10 @@ static int __handle_clients(void)
             __kill_children();
             exit(EXIT_FAILURE);
         }
-
+        if(fds[RMD_FD_POLL_SIGNAL].revents & POLLIN)
+        {
+            __clean_close(signal_fd, EXIT_SUCCESS);
+        }
         if (fds[RMD_FD_POLL_CLIENT].revents & POLLIN)
         {
             __handle_client();
@@ -194,6 +197,7 @@ void *handle_client(void *arg)
     ssize_t bytes_received;
 
     // Receive file name
+    printf("Receiving file name\n");
     bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0);
     if (bytes_received < 0)
     {
@@ -201,9 +205,11 @@ void *handle_client(void *arg)
         close(client_socket);
         pthread_exit(NULL);
     }
+    strcat(buffer, "_server");
     buffer[bytes_received] = '\0';
 
     // Open file for writing
+    printf("Opening file (%s) for writing.\n", buffer);
     file = fopen(buffer, "wb+");
     if (file == NULL)
     {
@@ -213,8 +219,10 @@ void *handle_client(void *arg)
     }
 
     // Receive and write file content
+    printf("Receiving file.\n");
     while ((bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0)) > 0)
     {
+        printf("Received bytes (%ld).\n", bytes_received);
         fwrite(buffer, 1, (size_t)bytes_received, file);
     }
     unsigned char *buf = 0;
@@ -238,7 +246,8 @@ void *handle_client(void *arg)
     {
         perror("Error receiving file content");
     }
-
+    // After successfully processing the file
+    send(client_socket, "ACK", 3, 0);
     fclose(file);
     close(client_socket);
     pthread_exit(NULL);
@@ -284,7 +293,8 @@ static void __handle_client(void)
             // FD_ISSET(0, &readfds) will be true.
             buffer[len] = '\0';
             syslog(LOG_NOTICE, "Received command %s from client %llu\n", buffer, client_id);
-            pthread_create(&thread_id, NULL, handle_client, (void *)&client_fd);
+            handle_client((void *)&client_fd);
+            //pthread_create(&thread_id, NULL, handle_client, (void *)&client_fd);
             write(client_fd, "", 0);
         }
         else if (len == 0)

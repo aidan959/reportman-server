@@ -18,6 +18,26 @@
                 "reveal": "always",
                 "panel": "new"
             }
+        },
+        {
+            "label": "MakeAllDebug",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "debug"
+            ],
+            "options": {
+                
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "Runs make file.",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
         }
     ],
     "version": "2.0.0"
