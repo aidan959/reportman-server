@@ -39,7 +39,7 @@ static int __force_singleton(int singleton_result, unsigned short port);
 
 typedef struct client_handle_t {
     int client_fd;
-    unsigned long long client_id;
+    unsigned long long * client_id;
 } client_handle_t;
 
 char *get_username(u_int64_t uid);
@@ -53,6 +53,12 @@ static void __handle_client(void);
 
 static void __clean_close(int signal_fd, int exit_code);
 static int __kill_children(void);
+
+pthread_mutex_t client_id_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
 
 int __force_singleton(int singleton_result, unsigned short port)
 {
@@ -208,8 +214,10 @@ void *handle_client(void *arg)
     char buffer[COMMUNICATION_BUFFER_SIZE];
     FILE *file;
     int client_socket = client_handle->client_fd;
-    long long unsigned int client_id = client_handle->client_id;
-
+    pthread_mutex_lock(&client_id_mutex);
+    client_handle->client_id++;
+    unsigned long long client_id = *client_handle->client_id;
+    pthread_mutex_unlock(&client_id_mutex);
     // Receive JSON data from client
     ssize_t bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0);
     if (bytes_received < 0) {
@@ -219,7 +227,7 @@ void *handle_client(void *arg)
     
     buffer[bytes_received] = '\0';
 
-    printf("Received JSON data: \n%s\n", buffer);
+    printf("Client (%llu): Received JSON data: \n%s\n", client_id, buffer);
     
     // Parse JSON data
     json_object *jobj = json_tokener_parse(buffer);
@@ -277,7 +285,7 @@ void *handle_client(void *arg)
     
 
     create_directory_if_not_exists(department);
-    
+
     // Open file for writing
     printf("Opening file (%s) for writing.\n", new_filename);
     file = fopen(new_filename, "wb");
@@ -286,7 +294,7 @@ void *handle_client(void *arg)
         close(client_socket);
         pthread_exit(NULL);
     }
-
+    send(client_socket, "ACK", 3, 0);
     // Receive file content
     printf("Receiving file content.\n");
     while (total_bytes_received < file_size) {
@@ -344,10 +352,9 @@ void *handle_client(void *arg)
 static void __handle_client(void)
 {
     static unsigned long long client_id = 0;
-    char buffer[COMMUNICATION_BUFFER_SIZE];
 
     struct sockaddr_in client_addr;
-    pthread_t thread_id;
+
 
     socklen_t client_addr_len = sizeof(client_addr);
 
@@ -369,49 +376,26 @@ static void __handle_client(void)
 
     FD_ZERO(&readfds);
     FD_SET(client_fd, &readfds);
-    client_handle_t client_handle = {client_fd, client_id};
-    int retval;
-    while ((retval = select(client_fd + 1, &readfds, NULL, NULL, &tv)))
-    {
-        handle_client((void *)&client_handle);
-        continue;
-        pthread_create(&thread_id, NULL, handle_client, (void *)&client_handle);
-        continue;
-        ssize_t len = read(client_fd, buffer, COMMUNICATION_BUFFER_SIZE - 1);
-        if (len > 0)
-        {
-            syslog(LOG_NOTICE, "Client %llu has connected to dameon.", client_id);
-            printf("Client %llu has connected to dameon.\n", client_id);
-            // FD_ISSET(0, &readfds) will be true.
-            buffer[len] = '\0';
-            syslog(LOG_NOTICE, "Received command %s from client %llu\n", buffer, client_id);
-            handle_client((void *)&client_fd);
-            //pthread_create(&thread_id, NULL, handle_client, (void *)&client_fd);
-            write(client_fd, "", 0);
-        }
-        else if (len == 0)
-        {
-            syslog(LOG_NOTICE, "Client %llu closed their connection.", client_id);
-            break;
-        }
-        else if (len < 0)
-        {
-            syslog(LOG_ERR, "read failed: %s", strerror(errno));
-        }
-    }
+    int retval = select(client_fd + 1, &readfds, NULL, NULL, &tv);
     if (retval == -1)
     {
         syslog(LOG_ERR, "select() failed: %s", strerror(errno));
     }
-    else
+    else if (retval == 0)
     {
-        // no comms made in 10 seconds - lets close prematurely so another client can connect
+        // No data received within timeout, close the connection
+        printf("Timeout reached. Closing connection.\n");
         char timeout_msg[] = "Timeout reached. Closing connection.";
         write(client_fd, timeout_msg, sizeof(timeout_msg));
+        close(client_fd);
+        return;
     }
-
-    close(client_fd); // Close the client socket
-    client_id++;
+    client_handle_t client_handle = {client_fd, &client_id};
+    pthread_t thread_id;
+    if(pthread_create(&thread_id, NULL, handle_client, (void *)&client_handle) != 0){
+        perror("Error creating thread");
+        close(client_fd);
+    } 
 }
 
 

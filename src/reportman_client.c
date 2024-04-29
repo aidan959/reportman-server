@@ -113,6 +113,18 @@ int main(int argc, char *argv[])
     // Clean up
     json_object_put(jobj);
 
+    ssize_t ack_bytes_read = read(client_socket, buffer, 3);
+    if (ack_bytes_read < 0)
+    {
+        perror("Error receiving response from server");
+        exit(EXIT_FAILURE);
+    }
+    buffer[ack_bytes_read] = '\0';
+    if (strcmp(buffer, "ACK") != 0)
+    {
+        printf("Unexpected server response: %s\n", buffer);
+        exit(EXIT_FAILURE);
+    }
     size_t total_bytes_received = 0;
     // Read and send file content
     printf("Reading and sending file content.\n");
@@ -125,10 +137,7 @@ int main(int argc, char *argv[])
         total_bytes_received += (size_t)bytes_read;
         print_progress(total_bytes_received, file_size);
     }
-    // send end of file
-    printf("Sending end of file marker.\n");
-    send(client_socket, "", 0, 0);
-
+ 
     // Receive JSON data from client
     ssize_t bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0);
     if (bytes_received < 0) {
