@@ -11,7 +11,7 @@
 #include "include/reportman_client.h"
 #include "libs/include/reportman.h"
 void print_progress(size_t received, size_t total);
-
+int get_json_response( int client_socket, char *buffer, char ** message );
 
 int main(int argc, char *argv[])
 {
@@ -113,18 +113,19 @@ int main(int argc, char *argv[])
     // Clean up
     json_object_put(jobj);
 
-    ssize_t ack_bytes_read = read(client_socket, buffer, 3);
-    if (ack_bytes_read < 0)
-    {
-        perror("Error receiving response from server");
+    char * message = malloc(COMMUNICATION_BUFFER_SIZE); 
+    if (get_json_response(client_socket, buffer, &message ) != D_SUCCESS) {
+        printf("Error sending file information to server: %s\n", message);
         exit(EXIT_FAILURE);
     }
-    buffer[ack_bytes_read] = '\0';
-    if (strcmp(buffer, "ACK") != 0)
+
+    if (strcmp(message, "ACK") != 0)
     {
         printf("Unexpected server response: %s\n", buffer);
         exit(EXIT_FAILURE);
     }
+    free(message);
+
     size_t total_bytes_received = 0;
     // Read and send file content
     printf("Reading and sending file content.\n");
@@ -190,4 +191,39 @@ void print_progress(size_t received, size_t total) {
     if(received == total) printf("\n");
     fflush(stdout);
 
+}
+
+
+int get_json_response( int client_socket, char *buffer, char ** message ){
+    if (message == NULL) 
+    {
+        printf("Message must be allocated before calling get_json_response\n");
+        exit(EXIT_FAILURE);
+    }
+    ssize_t bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0);
+    if (bytes_received < 0) {
+        perror("Error receiving JSON data");
+        exit(EXIT_FAILURE);
+    }
+    
+    buffer[bytes_received] = '\0';
+    printf("Received JSON data: \n%s\n", buffer);
+    json_object * jobj;
+    // Parse JSON data
+    jobj = json_tokener_parse(buffer);
+    if (jobj == NULL) {
+        perror("Error parsing JSON data");
+        exit(EXIT_FAILURE);
+    }
+    json_object *message_obj;
+    json_object *status_obj;
+    if( !json_object_object_get_ex(jobj, "message", &message_obj) ||
+        !json_object_object_get_ex(jobj, "status_code", &status_obj)) {
+            perror("Error extracting message or status_code from JSON object");
+            exit(EXIT_FAILURE);
+    }
+    *message = strdup(json_object_get_string(message_obj));
+    int status_code = json_object_get_int(status_obj);
+    json_object_put(jobj);
+    return status_code;
 }

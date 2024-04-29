@@ -18,11 +18,28 @@
 #include <sys/wait.h>
 #include <pwd.h>
 #include <grp.h>
+#include <sys/stat.h>
 #include <json-c/json.h>
 #include "include/reportman_server.h"
 #include "libs/include/reportman.h"
 #include "libs/include/daemonize.h"
 #include "libs/include/reportman_types.h"
+
+typedef struct {
+    int client_fd;
+    pthread_t thread_id;
+    char *username;
+    char *groupname;
+    unsigned long long bytes_transferred;
+    bool active;
+} client_info_t;
+
+// List (or other structure) to hold client info
+client_info_t *clients[MAX_CLIENTS];
+int client_count = 0;
+pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+
 
 static daemon_arguments_t __exec_args = {
     .make_daemon = true,
@@ -36,7 +53,10 @@ int d_socket;
 static void __acquire_singleton(void);
 static int __force_singleton(int singleton_result, unsigned short port);
 // ---
-
+void remove_client(int index);
+int add_client(int fd);
+void *monitor_clients(void *arg);
+void send_json_response(int client_socket, const char *message, int status_code);
 typedef struct client_handle_t {
     int client_fd;
     unsigned long long * client_id;
@@ -212,17 +232,27 @@ void *handle_client(void *arg)
 {
     client_handle_t* client_handle = (client_handle_t *) arg;
     char buffer[COMMUNICATION_BUFFER_SIZE];
-    FILE *file;
+    FILE *file = NULL;
     int client_socket = client_handle->client_fd;
+
+    pthread_mutex_lock(&clients_mutex);
+    int client_index = add_client(client_socket);
+    pthread_mutex_unlock(&clients_mutex);
+
+    if (client_index == -1) {
+        send_json_response(client_socket, "Max client limit reached.", COMMAND_ERROR);
+        goto close_socket;
+    }
+
     pthread_mutex_lock(&client_id_mutex);
     client_handle->client_id++;
-    unsigned long long client_id = *client_handle->client_id;
+    unsigned long long client_id = *(client_handle->client_id);
     pthread_mutex_unlock(&client_id_mutex);
     // Receive JSON data from client
     ssize_t bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0);
     if (bytes_received < 0) {
         perror("Error receiving JSON data");
-        exit(EXIT_FAILURE);
+        goto remove_client_close;
     }
     
     buffer[bytes_received] = '\0';
@@ -233,6 +263,8 @@ void *handle_client(void *arg)
     json_object *jobj = json_tokener_parse(buffer);
     if (jobj == NULL) {
         perror("Error parsing JSON data");
+        goto remove_client_close;
+
         exit(EXIT_FAILURE);
     }
 
@@ -270,38 +302,67 @@ void *handle_client(void *arg)
         printf("Received user_id: %ld (%s)\n", uid, username);
         printf("Received group_id: %ld (%s)\n", gid, groupname);
     } else {
+
         printf("Error: Unable to retrieve user or group information.\n");
+        send_json_response(client_socket, "Error creating directory.", COMMAND_ERROR);
+        goto close_json;
     }
-    
     printf("Received file_size: %ld\n", file_size);
     printf("Received file_name: %s\n", file_name);
     printf("Received file_path: %s\n", file_path);
     printf("Received department: %s\n", department);
-
 
     u_int64_t total_bytes_received = 0;
 
     char * new_filename = join_paths(department, file_name);
     
 
-    create_directory_if_not_exists(department);
+    int create_directory = create_directory_if_not_exists(department, uid, gid);
+
+    switch (create_directory) {
+        case COULD_NOT_CREATE_DIRECTORY:
+            send_json_response(client_socket, "Error creating directory.", COMMAND_ERROR);
+            close(client_socket);
+            pthread_exit(NULL);
+            break;
+        case USER_NOT_IN_DIRECTORY_GROUP:
+            send_json_response(client_socket, "User not in directory group.", COMMAND_ERROR);
+            close(client_socket);
+            pthread_exit(NULL);
+            break;
+        case COULD_NOT_CHOWN_DIRECTORY:
+            send_json_response(client_socket, "Server could not change owner of created directory.", COMMAND_ERROR);
+            close(client_socket);
+            pthread_exit(NULL);
+            break;
+        case D_SUCCESS:
+        default:
+            break;
+
+    }
 
     // Open file for writing
     printf("Opening file (%s) for writing.\n", new_filename);
     file = fopen(new_filename, "wb");
     if (file == NULL) {
         perror("Error opening file");
-        close(client_socket);
-        pthread_exit(NULL);
+        send_json_response(client_socket, "Error opening file", COMMAND_ERROR);
+        goto close_json;
     }
-    send(client_socket, "ACK", 3, 0);
+    // TODO CONFRIM THAT WE CAN GO AHEAD 
+    // SEND JSON THAT CONTAINS ERROR MESSAGE OR ACK
+        // After successfully processing the file
+    send_json_response(client_socket, "ACK", COMMAND_SUCCESSFUL);
+
+
     // Receive file content
     printf("Receiving file content.\n");
     while (total_bytes_received < file_size) {
+
         bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0);
         if (bytes_received < 0) {
-            perror("Error receiving file content");
-            exit(EXIT_FAILURE);
+            goto close_json;
+
         } else if (bytes_received == 0) {
             break;
         }
@@ -309,12 +370,14 @@ void *handle_client(void *arg)
         size_t written = fwrite(buffer, 1, (size_t)bytes_received, file);
         if (written < (size_t)bytes_received) {
             perror("File write failed");
-            exit(EXIT_FAILURE);
+            goto close_json;
         }
     }
     printf("File received.\n");
     if (bytes_received < 0) {
         perror("Error receiving file content");
+        goto close_json;
+
     }
     // After successfully processing the file
     json_object_put(jobj);
@@ -326,25 +389,30 @@ void *handle_client(void *arg)
     if (json_str == NULL)
     {
         perror("Error serializing JSON object");
-        exit(EXIT_FAILURE);
+        goto close_json;
     }
     if(strlen(json_str) > COMMUNICATION_BUFFER_SIZE){
         perror("JSON object too large, communication buffer will need to be increased.");
-        exit(EXIT_FAILURE);
+        goto close_json;
+
     }
-    printf("Sending JSON data to server.\n");
+    printf("Sending JSON data to client.\n");
     
     if (send(client_socket, json_str, strlen(json_str), 0) < 0)
     {
         perror("Error sending JSON data");
-        exit(EXIT_FAILURE);
+        goto close_json;
     }
-
-
-
     // Clean up
+    close_json:
     json_object_put(jobj);
-    fclose(file);
+    if (file != NULL)
+        fclose(file);
+    remove_client_close:
+    pthread_mutex_lock(&clients_mutex);
+    remove_client(client_index);
+    pthread_mutex_unlock(&clients_mutex);
+    close_socket:
     close(client_socket);
     pthread_exit(NULL);
 }
@@ -398,10 +466,6 @@ static void __handle_client(void)
     } 
 }
 
-
-
-
-
 char *get_username(u_int64_t uid) {
     struct passwd *pw = getpwuid((uid_t)uid);
     return (pw != NULL) ? pw->pw_name : NULL;
@@ -410,4 +474,88 @@ char *get_username(u_int64_t uid) {
 char *get_groupname(u_int64_t gid) {
     struct group *gr = getgrgid((gid_t)gid);
     return (gr != NULL) ? gr->gr_name : NULL;
+}
+
+
+
+/**
+ * Check if a user has write permission on a given directory.
+ *
+ * @param directory Path to the directory.
+ * @param user_id User ID of the client.
+ * @param group_id Group ID of the client.
+ * @return true if the user has write permission, false otherwise.
+ */
+bool has_write_permission(const char *directory, uid_t user_id, gid_t group_id) {
+    struct stat statbuf;
+
+    if (stat(directory, &statbuf) == -1) {
+        perror("Failed to get directory stats");
+        return false;
+    }
+
+    if (statbuf.st_uid == user_id) {
+        return (statbuf.st_mode & S_IWUSR) != 0;
+    }
+
+    if (statbuf.st_gid == group_id) {
+        return (statbuf.st_mode & S_IWGRP) != 0;
+    }
+
+    return (statbuf.st_mode & S_IWOTH) != 0;
+}
+
+
+void send_json_response(int client_socket, const char *message, int status_code) {
+    json_object *jobj = json_object_new_object();
+    json_object_object_add(jobj, "status_code", json_object_new_int(status_code));
+    json_object_object_add(jobj, "message", json_object_new_string(message));
+    const char *json_str = json_object_to_json_string(jobj);
+    if (json_str == NULL) {
+        perror("Error serializing JSON object");
+        exit(EXIT_FAILURE);
+    }
+    if (send(client_socket, json_str, strlen(json_str), 0) < 0) {
+        perror("Error sending JSON data");
+        exit(EXIT_FAILURE);
+    }
+    json_object_put(jobj);
+}
+
+
+int add_client(int fd) {
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (clients[i] == NULL) {
+            clients[i] = malloc(sizeof(client_info_t));
+            clients[i]->client_fd = fd;
+            clients[i]->bytes_transferred = 0;
+            clients[i]->active = true;
+            return i;
+        }
+    }
+    return -1;
+}
+
+
+void remove_client(int index) {
+    if (clients[index] != NULL) {
+        free(clients[index]);
+        clients[index] = NULL;
+    }
+}
+
+void *monitor_clients(void *arg) {
+    while (true) {
+        pthread_mutex_lock(&clients_mutex);
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            if (clients[i] != NULL && clients[i]->active) {
+                printf("Client %d: %llu bytes transferred, User: %s, Group: %s\n",
+                       clients[i]->client_fd, clients[i]->bytes_transferred,
+                       clients[i]->username, clients[i]->groupname);
+            }
+        }
+        pthread_mutex_unlock(&clients_mutex);
+        sleep(1);  // Update interval
+    }
+    return NULL;
 }

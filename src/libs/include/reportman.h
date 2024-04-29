@@ -17,9 +17,15 @@
 
 #define LSOF_FD_NOT_FOUND 2
 
+#define COULD_NOT_CREATE_DIRECTORY 1
+#define USER_NOT_IN_DIRECTORY_GROUP 2
+#define COULD_NOT_CHOWN_DIRECTORY 3
+
+#define MAX_CLIENTS 8
+
 char* join_paths(const char* path1, const char* path2);
 void split_path(const char *path, char **directory, char **filename);
-int create_directory_if_not_exists(const char* directory_name);
+int create_directory_if_not_exists(const char* directory_name, u_int64_t owner, u_int64_t group);
 
 
 #endif
