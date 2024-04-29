@@ -210,7 +210,7 @@ void *handle_client(void *arg)
         perror("Error receiving JSON data");
         exit(EXIT_FAILURE);
     }
-
+    printf("Received JSON data\n");
     // Null-terminate received data
     buffer[bytes_received] = '\0';
 
@@ -236,13 +236,6 @@ void *handle_client(void *arg)
     u_int64_t file_size = json_object_get_uint64(file_size_obj);
     const char *file_path = json_object_get_string(file_path_obj);
 
-    printf("Received user_id: %ld\n", uid);
-    printf("Received group_id: %ld\n", gid);
-    printf("Received file_size: %ld\n", file_size);
-    printf("Received file_path: %s\n", file_path);
-
-
-
     // Get user and group names
     char *username = get_username(uid);
     char *groupname = get_groupname(gid);
@@ -254,6 +247,9 @@ void *handle_client(void *arg)
         printf("Error: Unable to retrieve user or group information.\n");
     }
     
+    printf("Received file_size: %ld\n", file_size);
+    printf("Received file_path: %s\n", file_path);
+
     long file_size_received = 0;
     long total_bytes_received = 0;
 
@@ -273,6 +269,7 @@ void *handle_client(void *arg)
     // Receive file content
     printf("Receiving file content.\n");
     while (total_bytes_received < file_size_received) {
+        printf("recv'ing data.\n");
         bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0);
         if (bytes_received < 0) {
             perror("Error receiving file content");

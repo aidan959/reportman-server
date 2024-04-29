@@ -80,21 +80,26 @@ int main(int argc, char *argv[])
 
     // Serialize JSON object to string
     const char *json_str = json_object_to_json_string(jobj);
-
+    if (json_str == NULL)
+    {
+        perror("Error serializing JSON object");
+        exit(EXIT_FAILURE);
+    }
+    if(strlen(json_str) > COMMUNICATION_BUFFER_SIZE){
+        perror("JSON object too large, communication buffer will need to be increased.");
+        exit(EXIT_FAILURE);
+    }
+    printf("Sending JSON data to server.\n");
     // Send JSON data to server
-    send(client_socket, json_str, strlen(json_str), 0);
+    if (send(client_socket, json_str, strlen(json_str), 0) < 0)
+    {
+        perror("Error sending JSON data");
+        exit(EXIT_FAILURE);
+    }
 
     // Clean up
     json_object_put(jobj);
 
-
-
-    // Send file size
-    printf("Sending file size: %ld\n", file_size);
-    if (send(client_socket, &file_size, sizeof(file_size), 0) < 0) {
-        perror("Error sending file size");
-        exit(EXIT_FAILURE);
-    }
     size_t total_bytes_received = 0;
     // Read and send file content
     printf("Reading and sending file content.\n");
