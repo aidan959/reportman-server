@@ -34,7 +34,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/bin/reportman_client",
-            "args": ["127.0.0.1", "test.txt"],
+            "args": ["127.0.0.1", "test123.txt", "distribution"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],

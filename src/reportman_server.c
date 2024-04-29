@@ -37,6 +37,10 @@ static void __acquire_singleton(void);
 static int __force_singleton(int singleton_result, unsigned short port);
 // ---
 
+typedef struct client_handle_t {
+    int client_fd;
+    unsigned long long client_id;
+} client_handle_t;
 
 char *get_username(u_int64_t uid);
 char *get_groupname(u_int64_t gid);
@@ -200,11 +204,11 @@ static int __kill_children(void)
 
 void *handle_client(void *arg)
 {
-    client_handle_t *client_handle = (client_handle_t *) arg;
+    client_handle_t* client_handle = (client_handle_t *) arg;
     char buffer[COMMUNICATION_BUFFER_SIZE];
     FILE *file;
     int client_socket = client_handle->client_fd;
-    int client_id = client_handle->client_id;
+    long long unsigned int client_id = client_handle->client_id;
 
     // Receive JSON data from client
     ssize_t bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0);
@@ -225,13 +229,20 @@ void *handle_client(void *arg)
     }
 
     // Extract user ID and group ID from JSON object
-    json_object *uid_obj, *gid_obj, *file_size_obj, *file_path_obj, *file_name_obj;
+    json_object *uid_obj;
+    json_object *gid_obj;
+    json_object *file_size_obj;
+    json_object *file_path_obj;
+    json_object *department_obj;
+    json_object *file_name_obj;
     if (!json_object_object_get_ex(jobj, "user_id", &uid_obj) ||
         !json_object_object_get_ex(jobj, "group_id", &gid_obj) ||
         !json_object_object_get_ex(jobj, "file_size", &file_size_obj) ||
         !json_object_object_get_ex(jobj, "file_name", &file_name_obj)||
-        
-        !json_object_object_get_ex(jobj, "file_path", &file_path_obj)){
+        !json_object_object_get_ex(jobj, "department", &department_obj)||
+        !json_object_object_get_ex(jobj, "file_path", &file_path_obj)
+        ){
+
         perror("Error extracting user_id or group_id from JSON object");
         exit(EXIT_FAILURE);
     }
@@ -241,6 +252,7 @@ void *handle_client(void *arg)
     u_int64_t file_size = json_object_get_uint64(file_size_obj);
     const char *file_path = json_object_get_string(file_path_obj);
     const char *file_name = json_object_get_string(file_name_obj);
+    const char *department = json_object_get_string(department_obj);
 
     // Get user and group names
     char *username = get_username(uid);
@@ -254,14 +266,15 @@ void *handle_client(void *arg)
     }
     
     printf("Received file_size: %ld\n", file_size);
+    printf("Received file_name: %s\n", file_name);
     printf("Received file_path: %s\n", file_path);
-    printf("Received file_path: %s\n", file_path);
+    printf("Received department: %s\n", department);
 
 
     u_int64_t total_bytes_received = 0;
 
-    char new_filename[COMMUNICATION_BUFFER_SIZE] = "./output/";
-    strcat(new_filename, file_path);
+    char * new_filename = join_paths(department, file_name);
+    
 
 
     // Open file for writing
@@ -326,10 +339,6 @@ void *handle_client(void *arg)
     close(client_socket);
     pthread_exit(NULL);
 }
-typedef struct {
-    int client_fd;
-    unsigned long long client_id;
-} client_handle_t;
 
 static void __handle_client(void)
 {

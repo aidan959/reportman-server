@@ -17,4 +17,8 @@
 
 #define LSOF_FD_NOT_FOUND 2
 
+char* join_paths(const char* path1, const char* path2);
+void split_path(const char *path, char **directory, char **filename);
+
+
 #endif

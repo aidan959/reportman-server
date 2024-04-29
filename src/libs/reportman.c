@@ -30,21 +30,18 @@ char* join_paths(const char* path1, const char* path2) {
 void split_path(const char *path, char **directory, char **filename) {
     if (path == NULL) return;
 
-    const char *last_slash = strrchr(path, '/');  // Use '\\' for Windows paths
+    char *last_slash = strrchr(path, '/');  
     if (last_slash == NULL) {
-        // No slash found, assume the whole path is a filename
-        *directory = NULL;
+
+        *directory = strdup("");
         *filename = strdup(path);
     } else {
-        // Calculate the length of the directory part
-        int dir_length = last_slash - path + 1;
+        size_t dir_length = (size_t)last_slash - (size_t)path + 1;
         *directory = (char *)malloc(dir_length + 1);
         if (*directory) {
             strncpy(*directory, path, dir_length);
-            (*directory)[dir_length] = '\0';  // Null-terminate the directory path
+            (*directory)[dir_length] = '\0'; 
         }
-
-        // The filename is everything after the last slash
         *filename = strdup(last_slash + 1);
     }
 }

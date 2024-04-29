@@ -15,14 +15,21 @@ void print_progress(size_t received, size_t total);
 
 int main(int argc, char *argv[])
 {
-    if (argc != 3)
+    if (argc != 4)
     {
-        printf("Usage: %s <server_ip> <file_to_upload>\n", argv[0]);
+        printf("Usage: %s <server_ip> <file_to_upload> <destination_department>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
     char *server_ip = argv[1];
-    char *file_path = argv[2];
+    char *input_file = argv[2];
+    char *department = argv[3];
+
+
+    char *file_name;
+    char *file_path;
+
+    split_path(input_file, &file_path, &file_name);
 
     int client_socket;
     struct sockaddr_in server_addr;
@@ -55,14 +62,14 @@ int main(int argc, char *argv[])
     }
 
     // Open file for reading
-    printf("Opening file (%s) for reading.\n", file_path);
-    file = fopen(file_path, "rb");
+    printf("Opening file (%s) for reading.\n", input_file);
+    file = fopen(input_file, "rb");
     if (file == NULL)
     {
         perror("Error opening file");
         exit(EXIT_FAILURE);
     }
-
+    printf("Getting file size.\n");
     // Get file size
     fseek(file, 0, SEEK_END);
     size_t file_size = (size_t)ftell(file);
@@ -70,6 +77,7 @@ int main(int argc, char *argv[])
     // Get user ID and group ID
     uid_t uid = getuid();
     gid_t gid = getgid();
+    printf("Create JSON object.\n");
 
     // Create JSON object
     json_object *jobj = json_object_new_object();
@@ -78,7 +86,9 @@ int main(int argc, char *argv[])
     json_object_object_add(jobj, "file_size", json_object_new_uint64(file_size));
     json_object_object_add(jobj, "file_name", json_object_new_string(file_name));
     json_object_object_add(jobj, "file_path", json_object_new_string(file_path));
+    json_object_object_add(jobj, "department", json_object_new_string(department));
 
+    printf("Serializing JSON object.\n");
     // Serialize JSON object to string
     const char *json_str = json_object_to_json_string(jobj);
     if (json_str == NULL)
@@ -90,6 +100,8 @@ int main(int argc, char *argv[])
         perror("JSON object too large, communication buffer will need to be increased.");
         exit(EXIT_FAILURE);
     }
+    printf("JSON data: \n%s\n", json_str);
+
     printf("Sending JSON data to server.\n");
     // Send JSON data to server
     if (send(client_socket, json_str, strlen(json_str), 0) < 0)
