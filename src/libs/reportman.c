@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 
 char* join_paths(const char* path1, const char* path2) {
 
@@ -44,4 +45,25 @@ void split_path(const char *path, char **directory, char **filename) {
         }
         *filename = strdup(last_slash + 1);
     }
+}
+
+
+int create_directory_if_not_exists(const char* directory_name) {
+    struct stat st;
+
+    // Check if the directory exists
+    if (stat(directory_name, &st) == -1) {
+        // Directory doesn't exist, create it
+        if (mkdir(directory_name, 0777) == -1) {
+            // Error creating directory
+            perror("mkdir");
+            return 1; // Return error code
+        }
+        printf("Directory created successfully.\n");
+    } else {
+        // Directory already exists
+        printf("Directory already exists.\n");
+    }
+
+    return 0; // Return success code
 }

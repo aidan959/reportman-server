@@ -276,7 +276,8 @@ void *handle_client(void *arg)
     char * new_filename = join_paths(department, file_name);
     
 
-
+    create_directory_if_not_exists(department);
+    
     // Open file for writing
     printf("Opening file (%s) for writing.\n", new_filename);
     file = fopen(new_filename, "wb");
@@ -372,7 +373,8 @@ static void __handle_client(void)
     int retval;
     while ((retval = select(client_fd + 1, &readfds, NULL, NULL, &tv)))
     {
-
+        handle_client((void *)&client_handle);
+        continue;
         pthread_create(&thread_id, NULL, handle_client, (void *)&client_handle);
         continue;
         ssize_t len = read(client_fd, buffer, COMMUNICATION_BUFFER_SIZE - 1);
