@@ -106,7 +106,7 @@ int main(int argc, char *argv[])
     while ((bytes_read = fread(buffer, 1, COMMUNICATION_BUFFER_SIZE, file)) > 0) {
 
         if (send(client_socket, buffer, bytes_read, 0) < 0) {
-            perror("Error sending file content");
+            perror("\nError sending file content");
             exit(EXIT_FAILURE);
         }
         total_bytes_received += (size_t)bytes_read;
@@ -115,39 +115,36 @@ int main(int argc, char *argv[])
     // send end of file
     printf("Sending end of file marker.\n");
     send(client_socket, "", 0, 0);
-    if (bytes_read == 0)
-    {
-        perror("Error reading file");
+
+    // Receive JSON data from client
+    ssize_t bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0);
+    if (bytes_received < 0) {
+        perror("Error receiving JSON data");
         exit(EXIT_FAILURE);
     }
-    ssize_t net_bytes_read = 0;
-    // Wait for acknowledgment from the server
-    printf("Waiting for acknowledegement.\n");
-    while (1)
-    {
-        net_bytes_read = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0);
-        if (net_bytes_read < 0)
-        {
-            perror("Error receiving acknowledgment");
-            exit(EXIT_FAILURE);
-        }
-        else if (net_bytes_read == 0)
-        {
-            // Connection closed by server
-            printf("Server closed connection.\n");
-            break;
-        }
-        else
-        {
-            printf("Received acknowledegement: %s\n", buffer);
-            if (strcmp(buffer, "ACK") == 0)
-            {
-                // Acknowledgment received, exit loop
-                printf("Acknowledgment received. File upload complete.\n");
-                break;
-            }
-        }
+    
+    buffer[bytes_received] = '\0';
+
+    printf("Received JSON data: \n%s\n", buffer);
+    
+    // Parse JSON data
+    jobj = json_tokener_parse(buffer);
+    if (jobj == NULL) {
+        perror("Error parsing JSON data");
+        exit(EXIT_FAILURE);
     }
+
+    // Extract user ID and group ID from JSON object
+    json_object *bytes_read_obj = NULL;
+    if (!json_object_object_get_ex(jobj, "bytes_read", &bytes_read_obj)){
+         perror("Error extracting bytes_read from JSON object");
+        exit(EXIT_FAILURE);
+    }
+
+    u_int64_t net_bytes_read = json_object_get_uint64(bytes_read_obj);
+    printf("File transfer was successful. Bytes read: %lu\n", net_bytes_read);
+    json_object_put(jobj);
+    
     fclose(file);
     close(client_socket);
     return 0;

@@ -200,9 +200,11 @@ static int __kill_children(void)
 
 void *handle_client(void *arg)
 {
-    int client_socket = *((int *)arg);
+    client_handle_t *client_handle = (client_handle_t *) arg;
     char buffer[COMMUNICATION_BUFFER_SIZE];
     FILE *file;
+    int client_socket = client_handle->client_fd;
+    int client_id = client_handle->client_id;
 
     // Receive JSON data from client
     ssize_t bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0);
@@ -210,10 +212,11 @@ void *handle_client(void *arg)
         perror("Error receiving JSON data");
         exit(EXIT_FAILURE);
     }
-    printf("Received JSON data\n");
-    // Null-terminate received data
+    
     buffer[bytes_received] = '\0';
 
+    printf("Received JSON data: \n%s\n", buffer);
+    
     // Parse JSON data
     json_object *jobj = json_tokener_parse(buffer);
     if (jobj == NULL) {
@@ -250,8 +253,7 @@ void *handle_client(void *arg)
     printf("Received file_size: %ld\n", file_size);
     printf("Received file_path: %s\n", file_path);
 
-    long file_size_received = 0;
-    long total_bytes_received = 0;
+    u_int64_t total_bytes_received = 0;
 
     char new_filename[COMMUNICATION_BUFFER_SIZE] = "./output/";
     strcat(new_filename, file_path);
@@ -268,18 +270,15 @@ void *handle_client(void *arg)
 
     // Receive file content
     printf("Receiving file content.\n");
-    while (total_bytes_received < file_size_received) {
-        printf("recv'ing data.\n");
+    while (total_bytes_received < file_size) {
         bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0);
         if (bytes_received < 0) {
             perror("Error receiving file content");
             exit(EXIT_FAILURE);
         } else if (bytes_received == 0) {
-            printf("Connection closed by client.\n");
             break;
         }
-        total_bytes_received += bytes_received;
-        printf("Received bytes (%ld/%ld).\n", total_bytes_received, file_size_received);
+        total_bytes_received += (u_int64_t) bytes_received;
         size_t written = fwrite(buffer, 1, (size_t)bytes_received, file);
         if (written < (size_t)bytes_received) {
             perror("File write failed");
@@ -292,10 +291,40 @@ void *handle_client(void *arg)
     }
     // After successfully processing the file
     json_object_put(jobj);
+
+    jobj = json_object_new_object();
+    json_object_object_add(jobj, "bytes_read", json_object_new_uint64(total_bytes_received));
+    // Serialize JSON object to string
+    const char *json_str = json_object_to_json_string(jobj);
+    if (json_str == NULL)
+    {
+        perror("Error serializing JSON object");
+        exit(EXIT_FAILURE);
+    }
+    if(strlen(json_str) > COMMUNICATION_BUFFER_SIZE){
+        perror("JSON object too large, communication buffer will need to be increased.");
+        exit(EXIT_FAILURE);
+    }
+    printf("Sending JSON data to server.\n");
+    
+    if (send(client_socket, json_str, strlen(json_str), 0) < 0)
+    {
+        perror("Error sending JSON data");
+        exit(EXIT_FAILURE);
+    }
+
+
+
+    // Clean up
+    json_object_put(jobj);
     fclose(file);
     close(client_socket);
     pthread_exit(NULL);
 }
+typedef struct {
+    int client_fd;
+    unsigned long long client_id;
+} client_handle_t;
 
 static void __handle_client(void)
 {
@@ -325,11 +354,12 @@ static void __handle_client(void)
 
     FD_ZERO(&readfds);
     FD_SET(client_fd, &readfds);
-
+    client_handle_t client_handle = {client_fd, client_id};
     int retval;
     while ((retval = select(client_fd + 1, &readfds, NULL, NULL, &tv)))
     {
-        handle_client((void *)&client_fd);
+
+        pthread_create(&thread_id, NULL, handle_client, (void *)&client_handle);
         continue;
         ssize_t len = read(client_fd, buffer, COMMUNICATION_BUFFER_SIZE - 1);
         if (len > 0)
