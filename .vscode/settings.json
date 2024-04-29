@@ -1,5 +1,6 @@
 {
     "files.associations": {
+        "*.pl": "prolog",
         "*.pro": "prolog",
         "stdbool.h": "c",
         "reportman.h": "c",
@@ -14,6 +15,7 @@
         "string.h": "c",
         "syslog.h": "c",
         "signalfd.h": "c",
-        "in.h": "c"
+        "in.h": "c",
+        "stdlib.h": "c"
     }
 }

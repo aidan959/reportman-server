@@ -225,10 +225,12 @@ void *handle_client(void *arg)
     }
 
     // Extract user ID and group ID from JSON object
-    json_object *uid_obj, *gid_obj, *file_size_obj, *file_path_obj;
+    json_object *uid_obj, *gid_obj, *file_size_obj, *file_path_obj, *file_name_obj;
     if (!json_object_object_get_ex(jobj, "user_id", &uid_obj) ||
         !json_object_object_get_ex(jobj, "group_id", &gid_obj) ||
         !json_object_object_get_ex(jobj, "file_size", &file_size_obj) ||
+        !json_object_object_get_ex(jobj, "file_name", &file_name_obj)||
+        
         !json_object_object_get_ex(jobj, "file_path", &file_path_obj)){
         perror("Error extracting user_id or group_id from JSON object");
         exit(EXIT_FAILURE);
@@ -238,6 +240,7 @@ void *handle_client(void *arg)
     u_int64_t gid = json_object_get_uint64(gid_obj);
     u_int64_t file_size = json_object_get_uint64(file_size_obj);
     const char *file_path = json_object_get_string(file_path_obj);
+    const char *file_name = json_object_get_string(file_name_obj);
 
     // Get user and group names
     char *username = get_username(uid);
@@ -252,6 +255,8 @@ void *handle_client(void *arg)
     
     printf("Received file_size: %ld\n", file_size);
     printf("Received file_path: %s\n", file_path);
+    printf("Received file_path: %s\n", file_path);
+
 
     u_int64_t total_bytes_received = 0;
 

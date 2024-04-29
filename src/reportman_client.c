@@ -76,6 +76,7 @@ int main(int argc, char *argv[])
     json_object_object_add(jobj, "user_id", json_object_new_uint64(uid));
     json_object_object_add(jobj, "group_id", json_object_new_uint64(gid));
     json_object_object_add(jobj, "file_size", json_object_new_uint64(file_size));
+    json_object_object_add(jobj, "file_name", json_object_new_string(file_name));
     json_object_object_add(jobj, "file_path", json_object_new_string(file_path));
 
     // Serialize JSON object to string
