@@ -22,6 +22,7 @@
 #define COULD_NOT_CHOWN_DIRECTORY 3
 
 #define MAX_CLIENTS 8
+#define MAX_LOG_MESSAGES 5
 
 char* join_paths(const char* path1, const char* path2);
 void split_path(const char *path, char **directory, char **filename);

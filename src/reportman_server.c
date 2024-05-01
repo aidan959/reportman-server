@@ -20,6 +20,8 @@
 #include <grp.h>
 #include <sys/stat.h>
 #include <json-c/json.h>
+#include <time.h>
+#include <grp.h> 
 #include "include/reportman_server.h"
 #include "libs/include/reportman.h"
 #include "libs/include/daemonize.h"
@@ -28,9 +30,12 @@
 typedef struct {
     int client_fd;
     pthread_t thread_id;
-    char *username;
-    char *groupname;
+    char username[COMMUNICATION_BUFFER_SIZE];
+    char groupname[COMMUNICATION_BUFFER_SIZE];
     unsigned long long bytes_transferred;
+    unsigned long long file_size;
+    char file_name[COMMUNICATION_BUFFER_SIZE];
+    char recent_message[COMMUNICATION_BUFFER_SIZE * 2];
     bool active;
 } client_info_t;
 
@@ -57,6 +62,8 @@ void remove_client(int index);
 int add_client(int fd);
 void *monitor_clients(void *arg);
 void send_json_response(int client_socket, const char *message, int status_code);
+int chgrp(const char *path, gid_t group);
+
 typedef struct client_handle_t {
     int client_fd;
     unsigned long long * client_id;
@@ -64,6 +71,12 @@ typedef struct client_handle_t {
 
 char *get_username(u_int64_t uid);
 char *get_groupname(u_int64_t gid);
+
+void update_client_transfer_details(int client_index, unsigned long long bytes_transferred, unsigned long long file_size);
+void update_client_message(int client_index, char message[COMMUNICATION_BUFFER_SIZE]);
+void update_client_details(int client_index, const char *username, const char *groupname, const char *file_name);
+
+
 
 static bool __client_request_close = false;
 
@@ -139,6 +152,11 @@ int main(void)
 
     printf("Server got singleton on port: %u\n", __exec_args.daemon_port);
     fflush(stdout);
+    pthread_t monitor_thread;
+    if (pthread_create(&monitor_thread, NULL, monitor_clients, NULL) != 0) {
+        perror("Failed to start monitor thread");
+        return EXIT_FAILURE;
+    }
     return __handle_clients();
 }
 
@@ -234,10 +252,9 @@ void *handle_client(void *arg)
     char buffer[COMMUNICATION_BUFFER_SIZE];
     FILE *file = NULL;
     int client_socket = client_handle->client_fd;
-
-    pthread_mutex_lock(&clients_mutex);
+    char log_buffer[COMMUNICATION_BUFFER_SIZE * 2];
     int client_index = add_client(client_socket);
-    pthread_mutex_unlock(&clients_mutex);
+
 
     if (client_index == -1) {
         send_json_response(client_socket, "Max client limit reached.", COMMAND_ERROR);
@@ -256,9 +273,8 @@ void *handle_client(void *arg)
     }
     
     buffer[bytes_received] = '\0';
-
-    printf("Client (%llu): Received JSON data: \n%s\n", client_id, buffer);
-    
+    snprintf(log_buffer, COMMUNICATION_BUFFER_SIZE * 2, "Received JSON data: %s", buffer);
+    update_client_message(client_index, log_buffer);
     // Parse JSON data
     json_object *jobj = json_tokener_parse(buffer);
     if (jobj == NULL) {
@@ -287,31 +303,33 @@ void *handle_client(void *arg)
         exit(EXIT_FAILURE);
     }
 
-    u_int64_t uid = json_object_get_uint64(uid_obj);
-    u_int64_t gid = json_object_get_uint64(gid_obj);
+    u_int32_t uid = (u_int32_t)json_object_get_uint64(uid_obj);
+    u_int32_t gid = (u_int32_t)json_object_get_uint64(gid_obj);
     u_int64_t file_size = json_object_get_uint64(file_size_obj);
-    const char *file_path = json_object_get_string(file_path_obj);
+    // const char *file_path = json_object_get_string(file_path_obj); // not sure if we need this
+    
     const char *file_name = json_object_get_string(file_name_obj);
     const char *department = json_object_get_string(department_obj);
 
     // Get user and group names
-    char *username = get_username(uid);
-    char *groupname = get_groupname(gid);
+    const char *username = get_username(uid);
+    const char *groupname = get_groupname(gid);
 
     if (username != NULL && groupname != NULL) {
-        printf("Received user_id: %ld (%s)\n", uid, username);
-        printf("Received group_id: %ld (%s)\n", gid, groupname);
+        //printf("Received user_id: %ld (%s)\n", uid, username);
+        //printf("Received group_id: %ld (%s)\n", gid, groupname);
     } else {
 
-        printf("Error: Unable to retrieve user or group information.\n");
+        snprintf(log_buffer, COMMUNICATION_BUFFER_SIZE, "Error: Unable to retrieve user or group information.");
+        update_client_message(client_index, log_buffer);
         send_json_response(client_socket, "Error creating directory.", COMMAND_ERROR);
         goto close_json;
     }
-    printf("Received file_size: %ld\n", file_size);
-    printf("Received file_name: %s\n", file_name);
-    printf("Received file_path: %s\n", file_path);
-    printf("Received department: %s\n", department);
-
+    //printf("Received file_size: %ld\n", file_size);
+    //printf("Received file_name: %s\n", file_name);
+    //printf("Received file_path: %s\n", file_path);
+    //printf("Received department: %s\n", department);
+    update_client_details(client_index, username, groupname, file_name);
     u_int64_t total_bytes_received = 0;
 
     char * new_filename = join_paths(department, file_name);
@@ -322,18 +340,15 @@ void *handle_client(void *arg)
     switch (create_directory) {
         case COULD_NOT_CREATE_DIRECTORY:
             send_json_response(client_socket, "Error creating directory.", COMMAND_ERROR);
-            close(client_socket);
-            pthread_exit(NULL);
+            goto close_json;
             break;
         case USER_NOT_IN_DIRECTORY_GROUP:
             send_json_response(client_socket, "User not in directory group.", COMMAND_ERROR);
-            close(client_socket);
-            pthread_exit(NULL);
+            goto close_json;
             break;
         case COULD_NOT_CHOWN_DIRECTORY:
             send_json_response(client_socket, "Server could not change owner of created directory.", COMMAND_ERROR);
-            close(client_socket);
-            pthread_exit(NULL);
+            goto close_json;
             break;
         case D_SUCCESS:
         default:
@@ -342,23 +357,27 @@ void *handle_client(void *arg)
     }
 
     // Open file for writing
-    printf("Opening file (%s) for writing.\n", new_filename);
+    //printf("Opening file (%s) for writing.\n", new_filename);
     file = fopen(new_filename, "wb");
     if (file == NULL) {
         perror("Error opening file");
         send_json_response(client_socket, "Error opening file", COMMAND_ERROR);
         goto close_json;
     }
-    // TODO CONFRIM THAT WE CAN GO AHEAD 
-    // SEND JSON THAT CONTAINS ERROR MESSAGE OR ACK
-        // After successfully processing the file
+    if (chown(new_filename, uid, gid) == -1) {
+        perror("chown");
+        send_json_response(client_socket, "Changing owner failed.", COMMAND_ERROR);
+        goto close_json;
+
+    }
+
     send_json_response(client_socket, "ACK", COMMAND_SUCCESSFUL);
 
-
     // Receive file content
-    printf("Receiving file content.\n");
+    snprintf(log_buffer, COMMUNICATION_BUFFER_SIZE, "Receiving file content.");
+    update_client_message(client_index, log_buffer);
+    
     while (total_bytes_received < file_size) {
-
         bytes_received = recv(client_socket, buffer, COMMUNICATION_BUFFER_SIZE, 0);
         if (bytes_received < 0) {
             goto close_json;
@@ -367,13 +386,14 @@ void *handle_client(void *arg)
             break;
         }
         total_bytes_received += (u_int64_t) bytes_received;
+        update_client_transfer_details(client_index, total_bytes_received, file_size);
         size_t written = fwrite(buffer, 1, (size_t)bytes_received, file);
         if (written < (size_t)bytes_received) {
             perror("File write failed");
             goto close_json;
         }
     }
-    printf("File received.\n");
+    //printf("File received.\n");
     if (bytes_received < 0) {
         perror("Error receiving file content");
         goto close_json;
@@ -396,7 +416,7 @@ void *handle_client(void *arg)
         goto close_json;
 
     }
-    printf("Sending JSON data to client.\n");
+    //printf("Sending JSON data to client.\n");
     
     if (send(client_socket, json_str, strlen(json_str), 0) < 0)
     {
@@ -435,7 +455,7 @@ static void __handle_client(void)
         syslog(LOG_ALERT, "accept() failed (unexpected): %s", strerror(errno));
         return;
     }
-    printf("Client connected\n");
+    // printf("Client connected\n");
     fd_set readfds;
     struct timeval tv;
 
@@ -524,15 +544,20 @@ void send_json_response(int client_socket, const char *message, int status_code)
 
 
 int add_client(int fd) {
+    pthread_mutex_lock(&clients_mutex);
+    
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (clients[i] == NULL) {
             clients[i] = malloc(sizeof(client_info_t));
             clients[i]->client_fd = fd;
             clients[i]->bytes_transferred = 0;
             clients[i]->active = true;
+            pthread_mutex_unlock(&clients_mutex);
             return i;
         }
     }
+    pthread_mutex_unlock(&clients_mutex);
+
     return -1;
 }
 
@@ -544,18 +569,70 @@ void remove_client(int index) {
     }
 }
 
+void sleep_for_float_seconds(double seconds) {
+    struct timespec req, rem;
+
+    req.tv_sec = (time_t)seconds;
+
+    req.tv_nsec = (long)((seconds - (float)req.tv_sec) * 1e9);
+
+    while (nanosleep(&req, &rem) == -1) {
+        req = rem; 
+    }
+}
+
 void *monitor_clients(void *arg) {
+    int i;
     while (true) {
+        // Clear the screen
+        printf("\033[H\033[J"); // Terminal control: move cursor to top-left and clear the screen
+
         pthread_mutex_lock(&clients_mutex);
-        for (int i = 0; i < MAX_CLIENTS; i++) {
+        for (i = 0; i < MAX_CLIENTS; i++) {
             if (clients[i] != NULL && clients[i]->active) {
-                printf("Client %d: %llu bytes transferred, User: %s, Group: %s\n",
-                       clients[i]->client_fd, clients[i]->bytes_transferred,
-                       clients[i]->username, clients[i]->groupname);
+
+                printf("Client %d (%d) [%s] %llu / %llu bytes transferred, User: %s, Group: %s\n\t%s\n",
+                       i,
+                       clients[i]->client_fd,
+                       clients[i]->file_name,
+                       clients[i]->bytes_transferred,
+                       clients[i]->file_size,
+                       clients[i]->username,
+                       clients[i]->groupname,
+                       clients[i]->recent_message);
+            } else {
+                printf("Client %d:\n\tInactive\n", i);
+
             }
         }
         pthread_mutex_unlock(&clients_mutex);
-        sleep(1);  // Update interval
+
+        // Wait a second before refreshing
+        sleep_for_float_seconds(0.1);
     }
     return NULL;
+}
+
+void update_client_message(int client_index, char message[COMMUNICATION_BUFFER_SIZE]) {
+    pthread_mutex_lock(&clients_mutex);
+    strcpy(clients[client_index]->recent_message, message);
+    pthread_mutex_unlock(&clients_mutex);
+}
+
+
+void update_client_details(int client_index,
+    const char *username,
+    const char *groupname,
+    const  char *file_name) {
+    pthread_mutex_lock(&clients_mutex);
+    strcpy(clients[client_index]->username, username);
+    strcpy(clients[client_index]->groupname, groupname);
+    strcpy(clients[client_index]->file_name, file_name);
+    pthread_mutex_unlock(&clients_mutex);
+}
+void update_client_transfer_details(int client_index, unsigned long long bytes_transferred, unsigned long long file_size) {
+    pthread_mutex_lock(&clients_mutex);
+    clients[client_index]->bytes_transferred = bytes_transferred;
+    clients[client_index]->file_size = file_size;
+    pthread_mutex_unlock(&clients_mutex);
 }

@@ -66,7 +66,7 @@ int create_directory_if_not_exists(const char* directory_name, u_int64_t owner, 
             perror("chown");
             return COULD_NOT_CHOWN_DIRECTORY; // Return error code if changing owner/group failed
         }
-        printf("Directory created successfully.\n");
+        // printf("Directory created successfully.\n");
     } else {
         
         if (st.st_gid != group) {
@@ -74,7 +74,7 @@ int create_directory_if_not_exists(const char* directory_name, u_int64_t owner, 
             return USER_NOT_IN_DIRECTORY_GROUP; // Return a specific error code for group mismatch
         }
         
-        printf("Directory already exists.\n");
+        // printf("Directory already exists.\n");
     }
 
     return D_SUCCESS; 
